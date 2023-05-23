@@ -523,12 +523,9 @@ public interface RotarySnapBehavior {
 
     /**
      * A threshold after which snapping happens.
-     * There can be 2 thresholds - before snap and during snap (while snap is happening ).
-     * During-snap threshold is usually longer than before-snap so that
-     * the list will not scroll too fast.
      */
     @ExperimentalHorologistApi
-    public fun snapThreshold(duringSnap: Boolean): Float
+    public fun snapThreshold(): Float
 }
 
 /**
@@ -608,11 +605,9 @@ public class DefaultSnapBehavior(
     }
 
     @ExperimentalHorologistApi
-    override fun snapThreshold(duringSnap: Boolean): Float {
+    override fun snapThreshold(): Float {
         val averageSize = rotaryScrollAdapter.averageItemSize()
-        // it just looks better if it takes more scroll to trigger a snap second time.
-        return (if (duringSnap) averageSize * 0.7f else averageSize * 0.3f)
-            .coerceIn(50f..400f) // 30 percent of the average height
+        return averageSize.coerceIn(50f..400f)
     }
 
     private suspend fun snapToClosestItem() {
@@ -982,17 +977,18 @@ internal class RotaryScrollSnapHandler(
 ) : RotaryScrollHandler {
     // This constant is specific for high-res devices. Because that input values
     // can sometimes come with different sign, we have to filter them in this threshold
-    val gestureThresholdTime = 200L
-    val snapDelay = 100L
-    var scrollJob: Job = CompletableDeferred<Unit>()
-    var snapJob: Job = CompletableDeferred<Unit>()
+    private val gestureThresholdTime = 200L
+    private val snapDelay = 100L
+    private var scrollJob: Job = CompletableDeferred<Unit>()
+    private var snapJob: Job = CompletableDeferred<Unit>()
 
-    var previousScrollEventTime = 0L
-    var rotaryScrollDistance = 0f
-    var scrollInProgress = false
+    private var previousScrollEventTime = 0L
+    private var snapAccumulator = 0f
+    private var rotaryScrollDistance = 0f
+    private var scrollInProgress = false
 
-    var snapBehaviour = snapBehaviourFactory()
-    var scrollBehaviour = scrollBehaviourFactory()
+    private var snapBehaviour = snapBehaviourFactory()
+    private var scrollBehaviour = scrollBehaviourFactory()
 
     override suspend fun handleScrollEvent(
         coroutineScope: CoroutineScope,
@@ -1007,26 +1003,28 @@ internal class RotaryScrollSnapHandler(
             snapJob.cancel()
             snapBehaviour = snapBehaviourFactory()
             scrollBehaviour = scrollBehaviourFactory()
+            snapAccumulator = event.delta
             rotaryScrollDistance = event.delta
         } else {
-            // Filter out opposite axis values from end of scroll, also some values
-            // at the start of motion which sometimes appear with a different sign
             if (isOppositeValueAfterScroll(event.delta)) {
-                debugLog { "Opposite value after scroll. Filtering:${event.delta}" }
-                return
+                debugLog { "Opposite value after scroll:${event.delta}" }
             }
-            rotaryScrollDistance += event.delta
+            snapAccumulator += event.delta
+            if(!snapJob.isActive){
+                rotaryScrollDistance += event.delta
+            }
         }
+        debugLog { "Snap accumulator: $snapAccumulator" }
         debugLog { "Rotary scroll distance: $rotaryScrollDistance" }
         previousScrollEventTime = time
 
-        if (abs(rotaryScrollDistance) > snapBehaviour.snapThreshold(snapJob.isActive)) {
+        if (abs(snapAccumulator) > snapBehaviour.snapThreshold()) {
             debugLog { "Snap threshold reached" }
             scrollInProgress = false
             scrollBehaviour = scrollBehaviourFactory()
             scrollJob.cancel()
 
-            val snapDistance = sign(rotaryScrollDistance).toInt()
+            val snapDistance = sign(snapAccumulator).toInt()
             rotaryHaptics.handleSnapHaptic(event.delta)
 
             val sequentialSnap = snapJob.isActive
@@ -1046,13 +1044,15 @@ internal class RotaryScrollSnapHandler(
                     }
                 }
             }
+            snapAccumulator = 0f
             rotaryScrollDistance = 0f
         } else {
             if (!snapJob.isActive) {
                 scrollJob.cancel()
-                debugLog { "Scrolling for ${event.delta} px" }
+                // Real scrolling is 4 times slower for making scrolling before snap nicer.
+                debugLog { "Scrolling for ${rotaryScrollDistance/4} px" }
                 scrollJob = coroutineScope.async {
-                    scrollBehaviour.handleEvent(rotaryScrollDistance)
+                    scrollBehaviour.handleEvent(rotaryScrollDistance/4)
                 }
                 delay(snapDelay)
                 scrollInProgress = false
@@ -1064,8 +1064,8 @@ internal class RotaryScrollSnapHandler(
     }
 
     private fun isOppositeValueAfterScroll(delta: Float): Boolean =
-        sign(rotaryScrollDistance) * sign(delta) == -1f &&
-            (abs(delta) < abs(rotaryScrollDistance))
+        sign(snapAccumulator) * sign(delta) == -1f &&
+            (abs(delta) < abs(snapAccumulator))
 
     private fun isNewScrollEvent(timestamp: Long): Boolean {
         val timeDelta = timestamp - previousScrollEventTime
