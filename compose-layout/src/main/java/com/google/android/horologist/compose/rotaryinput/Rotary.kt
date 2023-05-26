@@ -18,7 +18,7 @@ package com.google.android.horologist.compose.rotaryinput
 
 import android.view.ViewConfiguration
 import androidx.compose.animation.core.AnimationState
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.copy
@@ -56,9 +56,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.transformLatest
 import kotlin.math.abs
+import kotlin.math.absoluteValue
+import kotlin.math.min
 import kotlin.math.sign
 
-private const val DEBUG = false
+private const val DEBUG = true
 
 /**
  * Debug logging that can be enabled.
@@ -189,8 +191,9 @@ public fun Modifier.rotaryWithSnap(
  * An extension function for creating [RotaryScrollAdapter] from [ScalingLazyListState]
  */
 @ExperimentalHorologistApi
-public fun ScalingLazyListState.toRotaryScrollAdapter(): RotaryScrollAdapter =
-    ScalingLazyColumnRotaryScrollAdapter(this)
+public fun ScalingLazyListState.toRotaryScrollAdapter(): RotaryScrollAdapter = ScalingLazyColumnRotaryScrollAdapter(
+    this
+)
 
 /**
  * An implementation of rotary scroll adapter for [ScalingLazyColumn]
@@ -207,6 +210,11 @@ public class ScalingLazyColumnRotaryScrollAdapter(
         val visibleItems = scrollableState.layoutInfo.visibleItemsInfo
         return (visibleItems.fastSumBy { it.unadjustedSize } / visibleItems.size).toFloat()
     }
+
+    /**
+     * Returns a size of currently selected item
+     */
+    override fun currentItemSize(): Float = scrollableState.layoutInfo.visibleItemsInfo.first { it.index == currentItemIndex() }.size.toFloat()
 
     /**
      * Current (centred) item index
@@ -236,6 +244,12 @@ public interface RotaryScrollAdapter {
      */
     @ExperimentalHorologistApi
     public fun averageItemSize(): Float
+
+    /**
+     * Size of a current item.
+     */
+    @ExperimentalHorologistApi
+    public fun currentItemSize(): Float
 
     /**
      * A current item index. Used for scrolling
@@ -275,26 +289,23 @@ public object RotaryDefaults {
             debugLog { "isLowRes : $isLowRes" }
             fun rotaryFlingBehavior() = flingBehavior?.run {
                 DefaultRotaryFlingBehavior(
-                    scrollableState,
-                    flingBehavior,
-                    viewConfiguration,
-                    flingTimeframe = if (isLowRes) lowResFlingTimeframe else highResFlingTimeframe
+                    scrollableState, flingBehavior, viewConfiguration,
+//                    flingTimeframe = if (isLowRes) lowResFlingTimeframe else highResFlingTimeframe
+                    flingTimeframe = highResFlingTimeframe
                 )
             }
 
             fun scrollBehavior() = AnimationScrollBehavior(scrollableState)
 
-            if (isLowRes) {
-                LowResRotaryScrollHandler(
-                    rotaryFlingBehaviorFactory = { rotaryFlingBehavior() },
-                    scrollBehaviorFactory = { scrollBehavior() }
-                )
-            } else {
-                HighResRotaryScrollHandler(
-                    rotaryFlingBehaviorFactory = { rotaryFlingBehavior() },
-                    scrollBehaviorFactory = { scrollBehavior() }
-                )
-            }
+//            if (isLowRes) {
+//                LowResRotaryScrollHandler(
+//                    rotaryFlingBehaviorFactory = { rotaryFlingBehavior() },
+//                    scrollBehaviorFactory = { scrollBehavior() }
+//                )
+//            } else {
+            RotaryScrollFlingHandler(rotaryFlingBehaviorFactory = { rotaryFlingBehavior() },
+                scrollBehaviorFactory = { scrollBehavior() })
+//            }
         }
     }
 
@@ -309,12 +320,16 @@ public object RotaryDefaults {
         rotaryScrollAdapter: RotaryScrollAdapter,
         snapParameters: SnapParameters = snapParametersDefault()
     ): RotaryScrollHandler {
+        val isLowRes = isLowResInput()
         return remember(rotaryScrollAdapter, snapParameters) {
             RotaryScrollSnapHandler(
                 snapBehaviourFactory = {
-                    DefaultSnapBehavior(rotaryScrollAdapter, snapParameters)
+                    RotarySnapBehavior(rotaryScrollAdapter, snapParameters)
                 },
-                scrollBehaviourFactory = { AnimationScrollBehavior(rotaryScrollAdapter.scrollableState) }
+                scrollBehaviourFactory = {
+                    AnimationScrollBehavior(rotaryScrollAdapter.scrollableState)
+                },
+                isLowRes = isLowRes
             )
         }
     }
@@ -323,15 +338,19 @@ public object RotaryDefaults {
      * Returns default [SnapParameters]
      */
     @ExperimentalHorologistApi
-    public fun snapParametersDefault(): SnapParameters = SnapParameters(snapOffset = 0)
+    public fun snapParametersDefault(): SnapParameters =
+        SnapParameters(
+            snapOffset = 0,
+            maxThreshold = 100f,
+            minSizeForInnerScroll = 300f
+        )
 
     /**
      * Returns whether the input is Low-res (a bezel) or high-res(a crown/rsb).
      */
     @ExperimentalHorologistApi
     @Composable
-    public fun isLowResInput(): Boolean = LocalContext.current.packageManager
-        .hasSystemFeature("android.hardware.rotaryencoder.lowres")
+    public fun isLowResInput(): Boolean = LocalContext.current.packageManager.hasSystemFeature("android.hardware.rotaryencoder.lowres")
 
     private val lowResFlingTimeframe: Long = 100L
     private val highResFlingTimeframe: Long = 30L
@@ -343,7 +362,11 @@ public object RotaryDefaults {
  * @param snapOffset an optional offset to be applied when snapping the item. After the snap the
  * snapped items offset will be [snapOffset].
  */
-public class SnapParameters(public val snapOffset: Int) {
+public class SnapParameters(
+    public val snapOffset: Int,
+    public val maxThreshold: Float = 100f,
+    public val minSizeForInnerScroll: Float = 300f
+) {
     /**
      * Returns a snapping offset in [Dp]
      */
@@ -368,9 +391,7 @@ public interface RotaryScrollHandler {
      */
     @ExperimentalHorologistApi
     public suspend fun handleScrollEvent(
-        coroutineScope: CoroutineScope,
-        event: TimestampedDelta,
-        rotaryHaptics: RotaryHapticHandler
+        coroutineScope: CoroutineScope, event: TimestampedDelta, rotaryHaptics: RotaryHapticHandler
     )
 }
 
@@ -448,12 +469,9 @@ public class DefaultRotaryFlingBehavior(
         // and the time of last motion event
         // 2) flingVelocity should exceed the minFlingSpeed
         debugLog {
-            "Check fling:  flingVelocity: $flingVelocity " +
-                "minFlingSpeed: $minFlingSpeed, maxFlingSpeed: $maxFlingSpeed"
+            "Check fling:  flingVelocity: $flingVelocity " + "minFlingSpeed: $minFlingSpeed, maxFlingSpeed: $maxFlingSpeed"
         }
-        if (latestEventTimestamp - flingTimestamp < timeRangeToFling &&
-            abs(flingVelocity) > minFlingSpeed
-        ) {
+        if (latestEventTimestamp - flingTimestamp < timeRangeToFling && abs(flingVelocity) > minFlingSpeed) {
             // Stops scrollAnimationCoroutine because a fling will be performed
             beforeFling()
             val velocity = flingVelocity.coerceIn(-maxFlingSpeed, maxFlingSpeed)
@@ -494,41 +512,6 @@ public interface RotaryFlingBehavior {
 }
 
 /**
- * An interface for snapping with rotary
- */
-@ExperimentalHorologistApi
-public interface RotarySnapBehavior {
-
-    /**
-     * Preparing snapping. This method should be called before [startSnappingSession] is called.
-     *
-     * Snapping is done for current + [moveForElements] items.
-     *
-     * If [sequentialSnap] is true, items are summed up together.
-     * For example, if [prepareSnapForItems] is called with
-     * [moveForElements] = 2, 3, 5 -> then the snapping will happen to current + 10 items
-     *
-     * If [sequentialSnap] is false, then [moveForElements] are not summed up together.
-     */
-    public fun prepareSnapForItems(moveForElements: Int, sequentialSnap: Boolean)
-
-    /**
-     * Performs snapping to the specified in [prepareSnapForItems] element
-     * If [toClosestItem] is true - then the snapping will happen to the closest item only.
-     * If it's set to false - then it'll snap to the element specified
-     * in [prepareSnapForItems] method.
-     */
-    @ExperimentalHorologistApi
-    public suspend fun startSnappingSession(toClosestItem: Boolean)
-
-    /**
-     * A threshold after which snapping happens.
-     */
-    @ExperimentalHorologistApi
-    public fun snapThreshold(): Float
-}
-
-/**
  * A rotary event object which contains a [timestamp] of the rotary event and a scrolled [delta].
  */
 @ExperimentalHorologistApi
@@ -552,9 +535,7 @@ public class AnimationScrollBehavior(
             debugLog { "ScrollAnimation value before start: ${scrollAnimation.value}" }
 
             scrollAnimation.animateTo(
-                targetValue,
-                animationSpec = spring(),
-                sequentialAnimation = sequentialAnimation
+                targetValue, animationSpec = spring(), sequentialAnimation = sequentialAnimation
             ) {
                 val delta = value - prevPosition
                 debugLog { "Animated by $delta, value: $value" }
@@ -571,10 +552,10 @@ public class AnimationScrollBehavior(
  * method for snapping to the Nth item
  */
 @ExperimentalHorologistApi
-public class DefaultSnapBehavior(
+public class RotarySnapBehavior(
     private val rotaryScrollAdapter: RotaryScrollAdapter,
-    private val snapParameters: SnapParameters
-) : RotarySnapBehavior {
+    private val snapParameters: SnapParameters,
+) {
     private var snapTarget: Int = 0
     private var sequentialSnap: Boolean = false
 
@@ -584,19 +565,38 @@ public class DefaultSnapBehavior(
     private val defaultStiffness = 200f
     private var snapTargetUpdated = true
 
+    /**
+     * Preparing snapping. This method should be called before [startSnappingSession] is called.
+     *
+     * Snapping is done for current + [moveForElements] items.
+     *
+     * If [sequentialSnap] is true, items are summed up together.
+     * For example, if [prepareSnapForItems] is called with
+     * [moveForElements] = 2, 3, 5 -> then the snapping will happen to current + 10 items
+     *
+     * If [sequentialSnap] is false, then [moveForElements] are not summed up together.
+     */
     @ExperimentalHorologistApi
-    override fun prepareSnapForItems(moveForElements: Int, sequentialSnap: Boolean) {
+    fun prepareSnapForItems(moveForElements: Int, sequentialSnap: Boolean) {
         this.sequentialSnap = sequentialSnap
         if (sequentialSnap) {
             snapTarget += moveForElements
         } else {
-            snapTarget = rotaryScrollAdapter.currentItemIndex() + moveForElements
+            snapTarget = (rotaryScrollAdapter.currentItemIndex() + moveForElements)
         }
+        snapTarget = snapTarget.coerceAtLeast(0)
+        debugLog { " Snap target updated" }
         snapTargetUpdated = true
     }
 
+    /**
+     * Performs snapping to the specified in [prepareSnapForItems] element
+     * If [toClosestItem] is true - then the snapping will happen to the closest item only.
+     * If it's set to false - then it'll snap to the element specified
+     * in [prepareSnapForItems] method.
+     */
     @ExperimentalHorologistApi
-    override suspend fun startSnappingSession(toClosestItem: Boolean) {
+    suspend fun startSnappingSession(toClosestItem: Boolean) {
         if (toClosestItem) {
             snapToClosestItem()
         } else {
@@ -604,11 +604,21 @@ public class DefaultSnapBehavior(
         }
     }
 
+    fun inScrollRange(event: TimestampedDelta): Boolean =
+        rotaryScrollAdapter.run {
+            val scrollRange = currentItemSize() / 2 - snapParameters.maxThreshold
+            currentItemSize() > snapParameters.minSizeForInnerScroll &&
+                (currentItemOffset() + event.delta).absoluteValue < scrollRange
+        }
+
+    /**
+     * A threshold after which snapping happens.
+     */
     @ExperimentalHorologistApi
-    override fun snapThreshold(): Float {
-        val averageSize = rotaryScrollAdapter.averageItemSize()
-        return averageSize.coerceIn(50f..400f)
-    }
+    fun snapThreshold(): Float = min(
+        snapParameters.maxThreshold * 2,
+        rotaryScrollAdapter.currentItemSize()
+    )
 
     private suspend fun snapToClosestItem() {
         // Snapping to the closest item by using performFling method with 0 speed
@@ -616,8 +626,8 @@ public class DefaultSnapBehavior(
             debugLog { "snap to closest item" }
             var prevPosition = 0f
             AnimationState(0f).animateTo(
-                targetValue = -rotaryScrollAdapter.currentItemOffset(),
-                animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing)
+                targetValue = expectedDistanceToClosestItem(),
+                animationSpec = tween(durationMillis = 200, easing = LinearOutSlowInEasing)
             ) {
                 val animDelta = value - prevPosition
                 scrollBy(animDelta)
@@ -633,7 +643,6 @@ public class DefaultSnapBehavior(
         } else {
             anim = AnimationState(0f)
         }
-        debugLog { "snapTarget $snapTarget" }
         rotaryScrollAdapter.scrollableState.scroll(MutatePriority.UserInput) {
             // If snapTargetUpdated is true - then the target was updated so we
             // need to do snap again
@@ -641,6 +650,7 @@ public class DefaultSnapBehavior(
                 snapTargetUpdated = false
                 var latestCenterItem: Int
                 var continueFirstScroll = true
+                debugLog { "snapTarget $snapTarget" }
                 while (continueFirstScroll) {
                     latestCenterItem = rotaryScrollAdapter.currentItemIndex()
                     anim = anim.copy(0f)
@@ -654,7 +664,7 @@ public class DefaultSnapBehavior(
                     var prevPosition = 0f
 
                     anim.animateTo(
-                        expectedDistance,
+                        targetValue = expectedDistance,
                         animationSpec = SpringSpec(
                             stiffness = defaultStiffness,
                             visibilityThreshold = 0.1f
@@ -663,8 +673,7 @@ public class DefaultSnapBehavior(
                     ) {
                         val animDelta = value - prevPosition
                         debugLog {
-                            "First animation, value:$value, velocity:$velocity, " +
-                                "animDelta:$animDelta"
+                            "First animation, value:$value, velocity:$velocity, animDelta:$animDelta"
                         }
 
                         // Exit animation if snap target was updated
@@ -683,10 +692,10 @@ public class DefaultSnapBehavior(
                         if (rotaryScrollAdapter.currentItemIndex() == snapTarget) {
                             debugLog { "Target is visible. Cancelling first animation" }
                             debugLog {
-                                "scrollableState.centerItemScrollOffset " +
-                                    "${rotaryScrollAdapter.currentItemOffset()}"
+                                "scrollableState.centerItemScrollOffset " + "${rotaryScrollAdapter.currentItemOffset()}"
                             }
-                            expectedDistance = -rotaryScrollAdapter.currentItemOffset()
+//                            expectedDistance = -rotaryScrollAdapter.currentItemOffset()
+                            expectedDistance = expectedDistanceToClosestItem()
                             continueFirstScroll = false
                             cancelAnimation()
                             return@animateTo
@@ -699,12 +708,9 @@ public class DefaultSnapBehavior(
                 anim = anim.copy(0f)
                 var prevPosition = 0f
                 anim.animateTo(
-                    expectedDistance,
-                    animationSpec = SpringSpec(
-                        stiffness = defaultStiffness,
-                        visibilityThreshold = 0.1f
-                    ),
-                    sequentialAnimation = (anim.velocity != 0f)
+                    expectedDistance, animationSpec = SpringSpec(
+                    stiffness = defaultStiffness, visibilityThreshold = 0.1f
+                ), sequentialAnimation = (anim.velocity != 0f)
                 ) {
                     // Exit animation if snap target was updated
                     if (snapTargetUpdated) cancelAnimation()
@@ -718,12 +724,21 @@ public class DefaultSnapBehavior(
         }
     }
 
+    private fun expectedDistanceToClosestItem(): Float =
+        rotaryScrollAdapter.run {
+            if (currentItemSize() > snapParameters.minSizeForInnerScroll) {
+                -sign(currentItemOffset()) *
+                    (currentItemOffset().absoluteValue - currentItemSize() / 2 + snapParameters.maxThreshold)
+            } else {
+                -currentItemOffset()
+            }
+        }
+
     private fun expectedDistanceTo(index: Int, targetScrollOffset: Int): Float {
         val averageSize = rotaryScrollAdapter.averageItemSize()
         val indexesDiff = index - rotaryScrollAdapter.currentItemIndex()
         debugLog { "Average size $averageSize" }
-        return (averageSize * indexesDiff) +
-            targetScrollOffset - rotaryScrollAdapter.currentItemOffset()
+        return (averageSize * indexesDiff) + targetScrollOffset - rotaryScrollAdapter.currentItemOffset()
     }
 }
 
@@ -748,28 +763,23 @@ public fun Modifier.rotaryHandler(
             eventsFlow
                 // TODO: batching causes additional delays.
                 // Do we really need to do this on this level?
-                .batchRequestsWithinTimeframe(batchTimeframe)
-                .collectLatest {
+                .batchRequestsWithinTimeframe(batchTimeframe).collectLatest {
                     debugLog {
-                        "Scroll event received: " +
-                            "delta:${it.delta}, timestamp:${it.timestamp}"
+                        "Scroll event received: " + "delta:${it.delta}, timestamp:${it.timestamp}"
                     }
                     rotaryScrollHandler.handleScrollEvent(this, it, rotaryHaptics)
                 }
         }
-        this
-            .onRotaryScrollEvent {
-                // Okay to ignore the ChannelResult returned from trySend because it is conflated
-                // (see rememberTimestampChannel()).
-                @Suppress("UNUSED_VARIABLE")
-                val unused = channel.trySend(
-                    TimestampedDelta(
-                        it.uptimeMillis,
-                        it.verticalScrollPixels * if (reverseDirection) -1f else 1f
-                    )
+        this.onRotaryScrollEvent {
+            // Okay to ignore the ChannelResult returned from trySend because it is conflated
+            // (see rememberTimestampChannel()).
+            @Suppress("UNUSED_VARIABLE") val unused = channel.trySend(
+                TimestampedDelta(
+                    it.uptimeMillis, it.verticalScrollPixels * if (reverseDirection) -1f else 1f
                 )
-                true
-            }
+            )
+            true
+        }
     }
 }
 
@@ -814,28 +824,23 @@ public fun Flow<TimestampedDelta>.batchRequestsWithinTimeframe(timeframe: Long):
  *
  * This scroll handler supports fling. It can be set with [RotaryFlingBehavior].
  */
-internal class HighResRotaryScrollHandler(
+internal class RotaryScrollFlingHandler(
     private val rotaryFlingBehaviorFactory: () -> RotaryFlingBehavior?,
     private val scrollBehaviorFactory: () -> RotaryScrollBehavior,
-    private val hapticsThreshold: Long = 50
 ) : RotaryScrollHandler {
 
-    // This constant is specific for high-res devices. Because that input values
-    // can sometimes come with different sign, we have to filter them in this threshold
     private val gestureThresholdTime = 200L
-    private var scrollJob: Job = CompletableDeferred<Unit>()
-    private var flingJob: Job = CompletableDeferred<Unit>()
-
     private var previousScrollEventTime = 0L
     private var rotaryScrollDistance = 0f
+
+    private var scrollJob: Job = CompletableDeferred<Unit>()
+    private var flingJob: Job = CompletableDeferred<Unit>()
 
     private var rotaryFlingBehavior: RotaryFlingBehavior? = rotaryFlingBehaviorFactory()
     private var scrollBehavior: RotaryScrollBehavior = scrollBehaviorFactory()
 
     override suspend fun handleScrollEvent(
-        coroutineScope: CoroutineScope,
-        event: TimestampedDelta,
-        rotaryHaptics: RotaryHapticHandler
+        coroutineScope: CoroutineScope, event: TimestampedDelta, rotaryHaptics: RotaryHapticHandler
     ) {
         val time = event.timestamp
         val isOppositeScrollValue = isOppositeValueAfterScroll(event.delta)
@@ -869,20 +874,18 @@ internal class HighResRotaryScrollHandler(
         if (rotaryFlingBehavior != null) {
             flingJob.cancel()
             flingJob = coroutineScope.async {
-                rotaryFlingBehavior?.trackFling(
-                    beforeFling = {
-                        debugLog { "Calling before fling section" }
-                        scrollJob.cancel()
-                        scrollBehavior = scrollBehaviorFactory()
-                    }
-                )
+                rotaryFlingBehavior?.trackFling(beforeFling = {
+                    debugLog { "Calling before fling section" }
+                    scrollJob.cancel()
+                    scrollBehavior = scrollBehaviorFactory()
+                })
             }
         }
     }
 
-    private fun isOppositeValueAfterScroll(delta: Float): Boolean =
-        sign(rotaryScrollDistance) * sign(delta) == -1f &&
-            (abs(delta) < abs(rotaryScrollDistance))
+    private fun isOppositeValueAfterScroll(delta: Float): Boolean = sign(rotaryScrollDistance) * sign(
+        delta
+    ) == -1f && (abs(delta) < abs(rotaryScrollDistance))
 
     private fun isNewScrollEvent(timestamp: Long): Boolean {
         val timeDelta = timestamp - previousScrollEventTime
@@ -897,188 +900,143 @@ internal class HighResRotaryScrollHandler(
 }
 
 /**
- * A scroll handler for Bezel(low-res) without snapping.
- * This scroll handler supports fling. It can be set with RotaryFlingBehavior.
- */
-internal class LowResRotaryScrollHandler(
-    private val rotaryFlingBehaviorFactory: () -> RotaryFlingBehavior?,
-    private val scrollBehaviorFactory: () -> RotaryScrollBehavior
-) : RotaryScrollHandler {
-
-    private val gestureThresholdTime = 200L
-    private var previousScrollEventTime = 0L
-    private var rotaryScrollDistance = 0f
-
-    private var scrollJob: Job = CompletableDeferred<Unit>()
-    private var flingJob: Job = CompletableDeferred<Unit>()
-
-    private var rotaryFlingBehavior: RotaryFlingBehavior? = rotaryFlingBehaviorFactory()
-    private var scrollBehavior: RotaryScrollBehavior = scrollBehaviorFactory()
-
-    override suspend fun handleScrollEvent(
-        coroutineScope: CoroutineScope,
-        event: TimestampedDelta,
-        rotaryHaptics: RotaryHapticHandler
-    ) {
-        val time = event.timestamp
-
-        if (isNewScrollEvent(time)) {
-            resetTracking(time)
-            rotaryScrollDistance = event.delta
-        } else {
-            rotaryFlingBehavior?.observeEvent(event.timestamp, event.delta)
-            rotaryScrollDistance += event.delta
-        }
-
-        scrollJob.cancel()
-        flingJob.cancel()
-
-        rotaryHaptics.handleScrollHaptic(event.delta)
-        debugLog { "Rotary scroll distance: $rotaryScrollDistance" }
-
-        previousScrollEventTime = time
-        scrollJob = coroutineScope.async {
-            scrollBehavior.handleEvent(rotaryScrollDistance)
-        }
-
-        flingJob = coroutineScope.async {
-            rotaryFlingBehavior?.trackFling(
-                beforeFling = {
-                    debugLog { "Calling before fling section" }
-                    scrollJob.cancel()
-                    scrollBehavior = scrollBehaviorFactory()
-                }
-            )
-        }
-    }
-
-    private fun isNewScrollEvent(timestamp: Long): Boolean {
-        val timeDelta = timestamp - previousScrollEventTime
-        return previousScrollEventTime == 0L || timeDelta > gestureThresholdTime
-    }
-
-    private fun resetTracking(timestamp: Long) {
-        scrollBehavior = scrollBehaviorFactory()
-        debugLog { "Velocity tracker reset" }
-        rotaryFlingBehavior = rotaryFlingBehaviorFactory()
-        rotaryFlingBehavior?.startFlingTracking(timestamp)
-    }
-}
-
-/**
- * A scroll handler for RSB(high-res) with snapping and without fling
+ * A scroll handler with snapping and without fling
  * Snapping happens after a threshold is reached ( set in [RotarySnapBehavior])
  *
  * This scroll handler doesn't support fling.
  */
 internal class RotaryScrollSnapHandler(
     val snapBehaviourFactory: () -> RotarySnapBehavior,
-    val scrollBehaviourFactory: () -> RotaryScrollBehavior
+    val scrollBehaviourFactory: () -> RotaryScrollBehavior,
+    val isLowRes: Boolean
 ) : RotaryScrollHandler {
-    // This constant is specific for high-res devices. Because that input values
-    // can sometimes come with different sign, we have to filter them in this threshold
+
     private val gestureThresholdTime = 200L
     private val snapDelay = 100L
+    private val resistanceFactor = 4f
     private var scrollJob: Job = CompletableDeferred<Unit>()
     private var snapJob: Job = CompletableDeferred<Unit>()
 
     private var previousScrollEventTime = 0L
     private var snapAccumulator = 0f
     private var rotaryScrollDistance = 0f
-    private var scrollInProgress = false
 
     private var snapBehaviour = snapBehaviourFactory()
     private var scrollBehaviour = scrollBehaviourFactory()
 
+    private var innerScrollHappened = false
+
     override suspend fun handleScrollEvent(
-        coroutineScope: CoroutineScope,
-        event: TimestampedDelta,
-        rotaryHaptics: RotaryHapticHandler
+        coroutineScope: CoroutineScope, event: TimestampedDelta, rotaryHaptics: RotaryHapticHandler
     ) {
         val time = event.timestamp
 
-        if (isNewScrollEvent(time)) {
-            debugLog { "New scroll event" }
-            resetTracking()
-            snapJob.cancel()
-            snapBehaviour = snapBehaviourFactory()
-            scrollBehaviour = scrollBehaviourFactory()
-            snapAccumulator = event.delta
-            rotaryScrollDistance = event.delta
-        } else {
-            if (isOppositeValueAfterScroll(event.delta)) {
-                debugLog { "Opposite value after scroll:${event.delta}" }
-            }
-            snapAccumulator += event.delta
-            if(!snapJob.isActive){
-                rotaryScrollDistance += event.delta
-            }
-        }
-        debugLog { "Snap accumulator: $snapAccumulator" }
-        debugLog { "Rotary scroll distance: $rotaryScrollDistance" }
-        previousScrollEventTime = time
+        if (snapBehaviour.inScrollRange(event)) {
 
-        if (abs(snapAccumulator) > snapBehaviour.snapThreshold()) {
-            debugLog { "Snap threshold reached" }
-            scrollInProgress = false
-            scrollBehaviour = scrollBehaviourFactory()
+            if (isNewScrollEvent(time)) {
+                debugLog { "New non-snap scroll" }
+                scrollBehaviour = scrollBehaviourFactory()
+                snapAccumulator = 0f
+                rotaryScrollDistance = 0f
+            }
+            if (!innerScrollHappened) {
+                debugLog { "Resetting innerScrollHappened" }
+                innerScrollHappened = true
+                scrollBehaviour = scrollBehaviourFactory()
+                rotaryScrollDistance = 0f
+            }
+
+            rotaryScrollDistance += event.delta
+            previousScrollEventTime = time
+
+            debugLog { "Non-snap scroll for $rotaryScrollDistance" }
+
+            rotaryHaptics.handleScrollHaptic(event.delta)
             scrollJob.cancel()
-
-            val snapDistance = sign(snapAccumulator).toInt()
-            rotaryHaptics.handleSnapHaptic(event.delta)
-
-            val sequentialSnap = snapJob.isActive
-            debugLog {
-                "Prepare snap: snapDistance:$snapDistance, " +
-                    "sequentialSnap: $sequentialSnap"
+            scrollJob = coroutineScope.async {
+                scrollBehaviour.handleEvent(rotaryScrollDistance)
             }
-            snapBehaviour.prepareSnapForItems(snapDistance, sequentialSnap)
-            if (!snapJob.isActive) {
+
+        } else {
+            if (isNewScrollEvent(time)) {
+                debugLog { "New scroll event" }
+                innerScrollHappened = false
                 snapJob.cancel()
-                snapJob = coroutineScope.async {
-                    debugLog { "Snap started" }
-                    try {
-                        snapBehaviour.startSnappingSession(false)
-                    } finally {
-                        debugLog { "Snap called finally" }
+                snapBehaviour = snapBehaviourFactory()
+                scrollBehaviour = scrollBehaviourFactory()
+                snapAccumulator = event.delta
+                rotaryScrollDistance = event.delta
+            } else {
+                if (innerScrollHappened) {
+                    innerScrollHappened = false
+                    scrollBehaviour = scrollBehaviourFactory()
+                    rotaryScrollDistance = 0f
+                }
+                snapAccumulator += event.delta
+                if (!snapJob.isActive) {
+                    rotaryScrollDistance += event.delta
+                }
+            }
+            debugLog { "Snap accumulator: $snapAccumulator" }
+            debugLog { "Rotary scroll distance: $rotaryScrollDistance" }
+            previousScrollEventTime = time
+
+            if ((isLowRes && !snapBehaviour.inScrollRange(event)) ||
+                abs(snapAccumulator) > snapBehaviour.snapThreshold()) {
+
+                debugLog { "Snap threshold reached" }
+                scrollBehaviour = scrollBehaviourFactory()
+                scrollJob.cancel()
+
+                val snapDistance = sign(snapAccumulator).toInt()
+                rotaryHaptics.handleSnapHaptic(event.delta)
+
+                val sequentialSnap = snapJob.isActive
+                debugLog {
+                    "Prepare snap: snapDistance:$snapDistance, " + "sequentialSnap: $sequentialSnap"
+                }
+                snapBehaviour.prepareSnapForItems(snapDistance, sequentialSnap)
+                if (!snapJob.isActive) {
+                    snapJob.cancel()
+                    snapJob = coroutineScope.async {
+                        debugLog { "Snap started" }
+                        try {
+                            snapBehaviour.startSnappingSession(false)
+                        } finally {
+                            debugLog { "Snap called finally" }
+                        }
                     }
                 }
-            }
-            snapAccumulator = 0f
-            rotaryScrollDistance = 0f
-        } else {
-            if (!snapJob.isActive) {
-                scrollJob.cancel()
-                // Real scrolling is 4 times slower for making scrolling before snap nicer.
-                debugLog { "Scrolling for ${rotaryScrollDistance/4} px" }
-                scrollJob = coroutineScope.async {
-                    scrollBehaviour.handleEvent(rotaryScrollDistance/4)
+                snapAccumulator = 0f
+                rotaryScrollDistance = 0f
+            } else {
+                if (!snapJob.isActive) {
+                    scrollJob.cancel()
+                    // Making visible scroll slower by adding a resistance .
+                    debugLog { "Scrolling for $rotaryScrollDistance/$resistanceFactor px" }
+                    scrollJob = coroutineScope.async {
+                        scrollBehaviour.handleEvent(rotaryScrollDistance / resistanceFactor)
+                    }
+                    delay(snapDelay)
+                    debugLog { "Snap delay passed" }
+                    scrollBehaviour = scrollBehaviourFactory()
+                    rotaryScrollDistance = 0f
+                    snapAccumulator = 0f
+                    snapBehaviour.prepareSnapForItems(0, false)
+                    snapBehaviour.startSnappingSession(true)
                 }
-                delay(snapDelay)
-                scrollInProgress = false
-                scrollBehaviour = scrollBehaviourFactory()
-                snapBehaviour.prepareSnapForItems(0, false)
-                snapBehaviour.startSnappingSession(true)
             }
         }
     }
-
-    private fun isOppositeValueAfterScroll(delta: Float): Boolean =
-        sign(snapAccumulator) * sign(delta) == -1f &&
-            (abs(delta) < abs(snapAccumulator))
 
     private fun isNewScrollEvent(timestamp: Long): Boolean {
         val timeDelta = timestamp - previousScrollEventTime
         return previousScrollEventTime == 0L || timeDelta > gestureThresholdTime
     }
 
-    private fun resetTracking() {
-        scrollInProgress = true
-    }
 }
 
 @Composable
-private fun rememberTimestampChannel() =
-    remember {
-        Channel<TimestampedDelta>(capacity = Channel.CONFLATED)
-    }
+private fun rememberTimestampChannel() = remember {
+    Channel<TimestampedDelta>(capacity = Channel.CONFLATED)
+}

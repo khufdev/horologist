@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -176,7 +177,7 @@ fun RotaryScrollWithFlingOrSnapScreen(
     var itemTypeIndex by remember { mutableStateOf(0) }
 
     val randomHeights: List<Int> = remember { (0..300).map { Random.nextInt(1, 10) } }
-    val tenSmallOneBig: List<Int> = remember { (0..4).map { 1 }.plus(20).plus((0..4).map { 1 }) }
+    val tenSmallOneBig: List<Int> = remember { (0..4).map { 1 }.plus(20).plus((0..12).map { 1 }) }
     if (showList) {
         val scalingLazyListState: ScalingLazyListState = rememberScalingLazyListState()
         val rotaryHapticHandler =
@@ -211,7 +212,7 @@ fun RotaryScrollWithFlingOrSnapScreen(
                 1 -> CardsList(2) { showList = false }
                 2 -> CardsList(10) { showList = false }
                 3 -> CardsList(10, randomHeights = randomHeights) { showList = false }
-                4 -> CardsList(10, itemCount = 10, randomHeights = tenSmallOneBig) {
+                4 -> MixedList{
                     showList = false
                 }
 
@@ -333,7 +334,7 @@ private fun ScalingLazyListScope.CardsList(
 
     items(itemCount) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
             onClick = onItemClicked
         ) {
             Column {
@@ -347,7 +348,64 @@ private fun ScalingLazyListScope.CardsList(
                     Text(text = "#$it")
                 }
                 Text(
-                    maxLines = randomHeights?.let { height -> height[it] } ?: maxLines,
+                    modifier = Modifier.fillMaxSize(),
+                    maxLines = randomHeights?.let { heights -> heights[it] } ?: maxLines,
+                    text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat"
+                )
+            }
+        }
+    }
+}
+
+private fun ScalingLazyListScope.MixedList(
+    onItemClicked: () -> Unit
+) {
+    val colors = listOf(Color.Green, Color.Yellow, Color.Cyan, Color.Magenta)
+
+    items(10) {
+        Card(
+            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+            onClick = onItemClicked
+        ) {
+            Column {
+                Row {
+                    Box(
+                        modifier = Modifier
+                            .size(15.dp)
+                            .clip(CircleShape)
+                            .background(color = colors[it % colors.size])
+                    )
+                    Text(text = "#$it")
+                }
+                Text(
+                    maxLines = 1,
+                    text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat"
+                )
+            }
+        }
+    }
+    item {
+        Text(
+            text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat"
+        )
+    }
+    items(10) {
+        Card(
+            modifier = Modifier.fillMaxWidth().wrapContentHeight(),
+            onClick = onItemClicked
+        ) {
+            Column {
+                Row {
+                    Box(
+                        modifier = Modifier
+                            .size(15.dp)
+                            .clip(CircleShape)
+                            .background(color = colors[it % colors.size])
+                    )
+                    Text(text = "#$it")
+                }
+                Text(
+                    maxLines = 1,
                     text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat"
                 )
             }
