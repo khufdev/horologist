@@ -59,9 +59,9 @@ import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CompactChip
 import androidx.wear.compose.material.Text
-import com.google.android.horologist.base.ui.components.Title
 import com.google.android.horologist.composables.SectionedList
 import com.google.android.horologist.compose.layout.ScalingLazyColumnState
+import com.google.android.horologist.compose.material.Title
 import com.google.android.horologist.compose.rotaryinput.rememberDisabledHaptic
 import com.google.android.horologist.compose.rotaryinput.rememberRotaryHapticHandler
 import com.google.android.horologist.compose.rotaryinput.rotaryWithFling
@@ -100,8 +100,8 @@ fun RotaryMenuScreen(
         ) {
             header {
                 Title(
-                    text = stringResource(R.string.rotarymenu_scroll),
-                    modifier = Modifier.padding(vertical = 8.dp)
+                    stringResource(R.string.rotarymenu_scroll),
+                    Modifier.padding(vertical = 8.dp)
                 )
             }
 
