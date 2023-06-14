@@ -24,9 +24,7 @@ import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.copy
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.MutatePriority
-import androidx.compose.foundation.OverscrollEffect
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollableDefaults
@@ -731,28 +729,26 @@ public fun Modifier.rotaryHandler(
     val channel = rememberTimestampChannel()
     val eventsFlow = remember(channel) { channel.receiveAsFlow() }
 
-    composed {
-        LaunchedEffect(eventsFlow) {
-            eventsFlow
-                // TODO: batching causes additional delays.
-                // Do we really need to do this on this level?
-                .batchRequestsWithinTimeframe(batchTimeframe).collectLatest {
-                    debugLog {
-                        "Scroll event received: " + "delta:${it.delta}, timestamp:${it.timestamp}"
-                    }
-                    rotaryScrollHandler.handleScrollEvent(this, it, rotaryHaptics)
+    LaunchedEffect(eventsFlow) {
+        eventsFlow
+            // TODO: batching causes additional delays.
+            // Do we really need to do this on this level?
+            .batchRequestsWithinTimeframe(batchTimeframe).collectLatest {
+                debugLog {
+                    "Scroll event received: " + "delta:${it.delta}, timestamp:${it.timestamp}"
                 }
-        }
-        this.onRotaryScrollEvent {
-            // Okay to ignore the ChannelResult returned from trySend because it is conflated
-            // (see rememberTimestampChannel()).
-            @Suppress("UNUSED_VARIABLE") val unused = channel.trySend(
-                TimestampedDelta(
-                    it.uptimeMillis, it.verticalScrollPixels * if (reverseDirection) -1f else 1f
-                )
+                rotaryScrollHandler.handleScrollEvent(this, it, rotaryHaptics)
+            }
+    }
+    this.onRotaryScrollEvent {
+        // Okay to ignore the ChannelResult returned from trySend because it is conflated
+        // (see rememberTimestampChannel()).
+        @Suppress("UNUSED_VARIABLE") val unused = channel.trySend(
+            TimestampedDelta(
+                it.uptimeMillis, it.verticalScrollPixels * if (reverseDirection) -1f else 1f
             )
-            true
-        }
+        )
+        true
     }
 }
 
