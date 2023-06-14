@@ -19,6 +19,7 @@
 
 package com.google.android.horologist.compose.layout
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.layout.Arrangement
@@ -112,6 +113,7 @@ public fun rememberColumnState(factory: ScalingLazyColumnState.Factory = Scaling
     return columnState
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @ExperimentalHorologistApi
 @Composable
 public fun ScalingLazyColumn(
