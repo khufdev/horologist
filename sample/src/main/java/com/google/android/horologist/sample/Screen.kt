@@ -45,6 +45,9 @@ sealed class Screen(
     object RotaryScrollWithFlingScreen : Screen("rotaryScrollWithFlingScreen")
     object RotarySnapListScreen : Screen("rotarySnapListScreen")
 
+    object RotaryTimePickerScreen : Screen("rotaryTimePickerScreen")
+    object RotaryDatePickerScreen : Screen("rotaryDatePickerScreen")
+
     object Paging : Screen("paging")
     object PagingItem : Screen("pagingItem?id={id}")
 

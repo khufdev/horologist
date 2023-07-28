@@ -57,10 +57,16 @@ import androidx.wear.compose.material.Card
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CompactChip
+import androidx.wear.compose.material.Icon
+import androidx.wear.compose.material.InlineSlider
+import androidx.wear.compose.material.InlineSliderDefaults
 import androidx.wear.compose.material.Text
+import com.google.android.horologist.composables.DatePicker
 import com.google.android.horologist.composables.SectionedList
+import com.google.android.horologist.composables.TimePicker
 import com.google.android.horologist.compose.layout.ScalingLazyColumnState
 import com.google.android.horologist.compose.material.Title
+import com.google.android.horologist.compose.rotaryinput.SnapParameters
 import com.google.android.horologist.compose.rotaryinput.rememberDisabledHaptic
 import com.google.android.horologist.compose.rotaryinput.rememberRotaryHapticHandler
 import com.google.android.horologist.compose.rotaryinput.rotaryWithFling
@@ -142,6 +148,36 @@ fun RotaryMenuScreen(
                 )
             }
         }
+        section(
+            listOf(
+                Pair(
+                    R.string.rotarymenu_time_picker,
+                    Screen.RotaryTimePickerScreen.route
+                ),
+                Pair(
+                    R.string.rotarymenu_date_picker,
+                    Screen.RotaryDatePickerScreen.route
+                ),
+            )
+        ) {
+            header {
+                Title(
+                    text = stringResource(R.string.rotarymenu_pickers),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+
+            loaded { item ->
+                Chip(
+                    label = {
+                        Text(text = stringResource(item.first))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { navigateToRoute(item.second) },
+                    colors = ChipDefaults.primaryChipColors()
+                )
+            }
+        }
     }
 }
 
@@ -187,9 +223,9 @@ fun RotaryScrollWithFlingOrSnapScreen(
             modifier = Modifier
                 .let {
                     if (isSnap) it.rotaryWithSnap(
-                        focusRequester,
-                        scalingLazyListState.toRotaryScrollAdapter(),
-                        rotaryHapticHandler
+                        focusRequester = focusRequester,
+                        rotaryScrollAdapter = scalingLazyListState.toRotaryScrollAdapter(),
+                        rotaryHaptics = rotaryHapticHandler
                     )
                     else if (isFling) it.rotaryWithFling(
                         focusRequester = focusRequester,
@@ -226,6 +262,101 @@ fun RotaryScrollWithFlingOrSnapScreen(
             onItemTypeIndexChanged = { itemTypeIndex = it },
             onHapticsToggled = { hapticsEnabled = !hapticsEnabled }
         )
+    }
+}
+
+@Composable
+fun RotaryTimePickerScreen() {
+    RotaryPickerScreen { resistanceFactor, thresholdDivider, onFinished ->
+        TimePicker(
+            onTimeConfirm = { onFinished() },
+            snapParameters = SnapParameters(
+                snapOffset = 0,
+                resistanceFactor = resistanceFactor,
+                thresholdDivider = thresholdDivider
+            )
+        )
+    }
+}
+
+@Composable
+fun RotaryDatePickerScreen() {
+    RotaryPickerScreen { resistanceFactor, thresholdDivider, onFinished ->
+        DatePicker(
+            onDateConfirm = { onFinished() },
+            snapParameters = SnapParameters(
+                snapOffset = 0,
+                resistanceFactor = resistanceFactor,
+                thresholdDivider = thresholdDivider
+            )
+        )
+    }
+}
+
+@Composable
+fun RotaryPickerScreen(
+    picker: @Composable (
+        resistanceFactor: Float,
+        thresholdDivider: Float,
+        onFinished: () -> Unit
+    ) -> Unit
+) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    var resistanceFactor by remember { mutableStateOf(2f) }
+    var thresholdDivider by remember { mutableStateOf(2f) }
+
+    if (showPicker) {
+        picker(resistanceFactor, thresholdDivider, { showPicker = false })
+    } else {
+        ScalingLazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            item {
+                Text(
+                    text = "Resistance factor $resistanceFactor",
+                    textAlign = TextAlign.Center
+                )
+            }
+            item {
+                InlineSlider(
+                    value = resistanceFactor,
+                    onValueChange = { resistanceFactor = it },
+                    steps = 10,
+                    valueRange = 1f..5f,
+                    increaseIcon = { Icon(InlineSliderDefaults.Increase, "Increase") },
+                    decreaseIcon = { Icon(InlineSliderDefaults.Decrease, "Decrease") },
+                )
+            }
+            item {
+                Text(
+                    text = "Threshold divider $thresholdDivider",
+                    textAlign = TextAlign.Center
+                )
+            }
+            item {
+                InlineSlider(
+                    value = thresholdDivider,
+                    onValueChange = { thresholdDivider = it },
+                    steps = 10,
+                    valueRange = 1f..5f,
+                    increaseIcon = { Icon(InlineSliderDefaults.Increase, "Increase") },
+                    decreaseIcon = { Icon(InlineSliderDefaults.Decrease, "Decrease") },
+                )
+            }
+            item {
+                CompactChip(
+                    onClick = { showPicker = true },
+                    label = {
+                        Text(
+                            text = "Show picker",
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                )
+            }
+        }
     }
 }
 

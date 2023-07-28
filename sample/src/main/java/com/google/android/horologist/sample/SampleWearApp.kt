@@ -44,9 +44,11 @@ import com.google.android.horologist.networks.NetworkScreen
 import com.google.android.horologist.pager.SamplePagerScreen
 import com.google.android.horologist.paging.PagingItemScreen
 import com.google.android.horologist.paging.PagingScreen
+import com.google.android.horologist.rotary.RotaryDatePickerScreen
 import com.google.android.horologist.rotary.RotaryMenuScreen
 import com.google.android.horologist.rotary.RotaryScrollScreen
 import com.google.android.horologist.rotary.RotaryScrollWithFlingOrSnapScreen
+import com.google.android.horologist.rotary.RotaryTimePickerScreen
 import com.google.android.horologist.sectionedlist.SectionedListMenuScreen
 import com.google.android.horologist.sectionedlist.expandable.SectionedListExpandableScreen
 import com.google.android.horologist.sectionedlist.stateful.SectionedListStatefulScreen
@@ -210,6 +212,12 @@ fun SampleWearApp() {
         }
         composable(route = Screen.RotarySnapListScreen.route) {
             RotaryScrollWithFlingOrSnapScreen(isFling = false, isSnap = true)
+        }
+        composable(route = Screen.RotaryTimePickerScreen.route) {
+            RotaryTimePickerScreen()
+        }
+        composable(route = Screen.RotaryDatePickerScreen.route) {
+            RotaryDatePickerScreen()
         }
         scrollable(
             route = Screen.Paging.route,

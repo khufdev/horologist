@@ -52,11 +52,13 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.PickerGroup
-import androidx.wear.compose.material.PickerGroupState
-import androidx.wear.compose.material.PickerState
 import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.rememberPickerGroupState
+import com.google.android.horologist.composables.picker.PickerGroup
+import com.google.android.horologist.composables.picker.PickerGroupState
+import com.google.android.horologist.composables.picker.PickerState
+import com.google.android.horologist.composables.picker.rememberPickerGroupState
+import com.google.android.horologist.compose.rotaryinput.RotaryDefaults
+import com.google.android.horologist.compose.rotaryinput.SnapParameters
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
@@ -78,6 +80,7 @@ import java.time.temporal.TemporalAdjusters
 @Composable
 public fun DatePicker(
     onDateConfirm: (LocalDate) -> Unit,
+    snapParameters: SnapParameters = RotaryDefaults.snapParametersDefault(),
     modifier: Modifier = Modifier,
     date: LocalDate = LocalDate.now(),
     fromDate: LocalDate? = null,
@@ -245,6 +248,7 @@ public fun DatePicker(
                                     FocusableElementDatePicker.MONTH
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = dayContentDescription,
                             option = pickerTextOption(textStyle) {
                                 "%d".format(datePickerState.currentDay(it))
@@ -259,6 +263,7 @@ public fun DatePicker(
                                     FocusableElementDatePicker.YEAR
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = monthContentDescription,
                             option = pickerTextOption(textStyle) {
                                 shortMonthNames[(datePickerState.currentMonth(it) - 1) % 12]
@@ -273,6 +278,7 @@ public fun DatePicker(
                                     FocusableElementDatePicker.CONFIRM_BUTTON
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = yearContentDescription,
                             option = pickerTextOption(textStyle) {
                                 "%4d".format(datePickerState.currentYear(it))

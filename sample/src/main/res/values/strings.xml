@@ -48,6 +48,9 @@
     <string name="rotarymenu_scroll_with_fling">Scroll with fling</string>
     <string name="rotarymenu_snap">Snap</string>
     <string name="rotarymenu_snap_list">Snap list</string>
+    <string name="rotarymenu_pickers">Pickers</string>
+    <string name="rotarymenu_time_picker">TimePicker</string>
+    <string name="rotarymenu_date_picker">DatePicker</string>
 
     <array name="rotarymenu_item_sizes">
         <item>Small items</item>

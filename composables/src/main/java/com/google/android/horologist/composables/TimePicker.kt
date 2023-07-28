@@ -65,25 +65,27 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.wear.compose.foundation.ExperimentalWearFoundationApi
+import androidx.wear.compose.foundation.rememberActiveFocusRequester
 import androidx.wear.compose.material.Button
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.PickerGroup
-import androidx.wear.compose.material.PickerGroupItem
-import androidx.wear.compose.material.PickerGroupState
-import androidx.wear.compose.material.PickerScope
-import androidx.wear.compose.material.PickerState
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TouchExplorationStateProvider
-import androidx.wear.compose.material.rememberPickerGroupState
-import androidx.wear.compose.material.rememberPickerState
-import com.google.android.horologist.compose.rotaryinput.onRotaryInputAccumulated
-import com.google.android.horologist.compose.rotaryinput.rememberRotaryHapticHandler
+import com.google.android.horologist.composables.picker.PickerGroup
+import com.google.android.horologist.composables.picker.PickerGroupItem
+import com.google.android.horologist.composables.picker.PickerGroupState
+import com.google.android.horologist.composables.picker.PickerScope
+import com.google.android.horologist.composables.picker.PickerState
+import com.google.android.horologist.composables.picker.rememberPickerGroupState
+import com.google.android.horologist.composables.picker.rememberPickerState
+import com.google.android.horologist.composables.picker.toRotaryScrollAdapter
+import com.google.android.horologist.compose.rotaryinput.RotaryDefaults
+import com.google.android.horologist.compose.rotaryinput.SnapParameters
+import com.google.android.horologist.compose.rotaryinput.rotaryWithSnap
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import java.time.LocalTime
 import java.time.temporal.ChronoField
-import kotlin.math.sign
 
 /**
  * A full screen TimePicker with hours, minutes and seconds.
@@ -104,6 +106,7 @@ import kotlin.math.sign
 @Composable
 public fun TimePicker(
     onTimeConfirm: (LocalTime) -> Unit,
+    snapParameters: SnapParameters = RotaryDefaults.snapParametersDefault(),
     modifier: Modifier = Modifier,
     time: LocalTime = LocalTime.now(),
     showSeconds: Boolean = true
@@ -183,7 +186,9 @@ public fun TimePicker(
                 }
             }
 
-        Box(modifier = modifier.fillMaxSize().alpha(fullyDrawn.value)) {
+        Box(modifier = modifier
+            .fillMaxSize()
+            .alpha(fullyDrawn.value)) {
             Column(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -221,6 +226,7 @@ public fun TimePicker(
                                     FocusableElementsTimePicker.MINUTES
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = hourContentDescription,
                             option = pickerOption
                         ),
@@ -234,6 +240,7 @@ public fun TimePicker(
                                     else FocusableElementsTimePicker.CONFIRM_BUTTON
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = minuteContentDescription,
                             option = pickerOption
                         )
@@ -249,6 +256,7 @@ public fun TimePicker(
                                         FocusableElementsTimePicker.CONFIRM_BUTTON
                                     )
                                 },
+                                snapParameters = snapParameters,
                                 contentDescription = secondContentDescription,
                                 option = pickerOption
                             )
@@ -318,6 +326,7 @@ public fun TimePicker(
 @Composable
 public fun TimePickerWith12HourClock(
     onTimeConfirm: (LocalTime) -> Unit,
+    snapParameters: SnapParameters = RotaryDefaults.snapParametersDefault(),
     modifier: Modifier = Modifier,
     time: LocalTime = LocalTime.now()
 ) {
@@ -393,7 +402,9 @@ public fun TimePickerWith12HourClock(
             }
         }
         Box(
-            modifier = modifier.fillMaxSize().alpha(fullyDrawn.value)
+            modifier = modifier
+                .fillMaxSize()
+                .alpha(fullyDrawn.value)
         ) {
             Column(
                 modifier = modifier.fillMaxSize(),
@@ -444,6 +455,7 @@ public fun TimePickerWith12HourClock(
                                     FocusableElement12Hour.MINUTES
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = hoursContentDescription,
                             option = pickerTextOption(textStyle) { "%02d".format(it + 1) }
                         ),
@@ -456,6 +468,7 @@ public fun TimePickerWith12HourClock(
                                     FocusableElement12Hour.PERIOD
                                 )
                             },
+                            snapParameters = snapParameters,
                             contentDescription = minutesContentDescription,
                             option = pickerTextOption(textStyle) { "%02d".format(it) }
                         ),
@@ -469,6 +482,7 @@ public fun TimePickerWith12HourClock(
                                     FocusableElement12Hour.CONFIRM_BUTTON
                                 )
                             },
+                            snapParameters = snapParameters,
                             option = pickerTextOption(textStyle) {
                                 if (it == 0) amString else pmString
                             }
@@ -535,6 +549,7 @@ private fun Separator(width: Dp, textStyle: TextStyle) {
     Spacer(Modifier.width(width))
 }
 
+@OptIn(ExperimentalWearFoundationApi::class)
 @Composable
 @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
 internal fun pickerGroupItemWithRSB(
@@ -542,38 +557,19 @@ internal fun pickerGroupItemWithRSB(
     modifier: Modifier,
     contentDescription: String?,
     onSelected: () -> Unit,
+    snapParameters: SnapParameters,
     readOnlyLabel: @Composable (BoxScope.() -> Unit)? = null,
     option: @Composable PickerScope.(optionIndex: Int, pickerSelected: Boolean) -> Unit
 ): PickerGroupItem {
-    val coroutineScope = rememberCoroutineScope()
-    val haptics = rememberRotaryHapticHandler(
-        scrollableState = pickerState,
-        throttleThresholdMs = 10
-    )
-    var animationScrollTarget: Int by remember { mutableIntStateOf(pickerState.selectedOption) }
-    var activeJob: Job? by remember { mutableStateOf(null) }
+    val localFocusRequester = rememberActiveFocusRequester()
 
     return PickerGroupItem(
         pickerState = pickerState,
-        modifier = modifier.onRotaryInputAccumulated(rateLimitCoolDownMs = 5L) { change ->
-
-            val diff = sign(change)
-
-            if (activeJob == null || activeJob?.isActive == false) {
-                animationScrollTarget = pickerState.selectedOption
-            }
-            animationScrollTarget += diff.toInt()
-
-            if (!pickerState.repeatItems) {
-                animationScrollTarget =
-                    animationScrollTarget.coerceIn(0, pickerState.numberOfOptions)
-            }
-
-            activeJob = coroutineScope.launch {
-                haptics.handleSnapHaptic(diff)
-                pickerState.animateScrollToOption(animationScrollTarget)
-            }
-        },
+        modifier = modifier.rotaryWithSnap(
+            localFocusRequester,
+            pickerState.toRotaryScrollAdapter(),
+            snapParameters
+        ),
         contentDescription = contentDescription,
         onSelected = onSelected,
         readOnlyLabel = readOnlyLabel,
